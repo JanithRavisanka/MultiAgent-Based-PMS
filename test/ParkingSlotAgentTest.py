@@ -56,7 +56,8 @@ class ParkingSlotAgent(Agent):
                         response_msg.set_metadata("performative", "inform")
                         response_msg.body = json.dumps({
                             "type": "confirm_response",
-                            "slot": self.agent.location
+                            "slot": self.agent.location,
+                            "slot_jid": str(self.agent.jid)
                         })
                         await self.send(response_msg)
                         self.set_next_state("WAIT_FOR_DEPARTURE")
