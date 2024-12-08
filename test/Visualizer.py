@@ -99,7 +99,7 @@ class Car:
 
     def set_path(self, new_path):
         self.path = new_path
-        self.target_index = 1
+        self.target_index =1
 
     def update(self):
         print(self.path)

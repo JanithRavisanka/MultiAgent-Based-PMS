@@ -26,54 +26,44 @@ class ParkingSlotAgent(Agent):
     class WaitForRequestAndConfirmationState(State):
         async def run(self):
             print(f"[{self.agent.jid}] Waiting for parking requests or confirmations...")
-            timeout = 20  # Total wait time for messages
-            while timeout > 0:
-                msg = await self.receive(timeout=1)
-                if msg:
-                    content = json.loads(msg.body)
-                    print(f"[{self.agent.jid}] Received message: {content}")
-
-                    # Handle parking request
-                    if content.get("type") == "parking_request" and self.agent.current_car is None:
-                        car_jid = content.get("jid")
-                        response_msg = Message(to=car_jid)
-                        response_msg.set_metadata("performative", "inform")
-                        response_msg.body = json.dumps({
-                            "type": "parking_response",
-                            "location": self.agent.location,
-                            "cost_per_hour": self.agent.cost_per_hour,
-                            "slot_jid": str(self.agent.jid)
-                        })
-                        await self.send(response_msg)
-                        print(f"[{self.agent.jid}] Sent parking details to {car_jid}.")
-                    
-                    # Handle parking confirmation
-                    elif content.get("type") == "confirm_parking" and self.agent.current_car is None:
-                        self.agent.current_car = content.get("car")
-                        print(f"[{self.agent.jid}] Parking confirmed for car: {self.agent.current_car}.")
-                        
-                        response_msg = Message(to=self.agent.current_car)
-                        response_msg.set_metadata("performative", "inform")
-                        response_msg.body = json.dumps({
-                            "type": "confirm_response",
-                            "slot": self.agent.location,
-                            "slot_jid": str(self.agent.jid)
-                        })
-                        await self.send(response_msg)
-                        self.set_next_state("WAIT_FOR_DEPARTURE")
-                        return  # Exit the state after confirmation
-                    
-                    # Handle invalid messages
-                    elif self.agent.current_car is not None and content.get("type") == "parking_request":
-                        print(f"[{self.agent.jid}] Invalid message type or slot already occupied.")
-                        
-
-                timeout -= 1
-
-            print(f"[{self.agent.jid}] No valid messages received, staying in WAIT_FOR_REQUEST_AND_CONFIRMATION.")
-            self.set_next_state("WAIT_FOR_REQUEST_AND_CONFIRMATION")
-                
-
+            msg = await self.receive(timeout=20)
+            if msg:
+                content = json.loads(msg.body)
+                print(f"[{self.agent.jid}] Received message: {content}")
+                if content.get("type") == "parking_request" and self.agent.current_car is None:
+                    car_jid = content.get("jid")
+                    response_msg = Message(to=car_jid)
+                    response_msg.set_metadata("performative", "inform")
+                    response_msg.body = json.dumps({
+                        "type": "parking_response",
+                        "location": self.agent.location,
+                        "cost_per_hour": self.agent.cost_per_hour,
+                        "slot_jid": str(self.agent.jid)
+                    })
+                    await self.send(response_msg)
+                    print(f"[{self.agent.jid}] Sent parking details to {car_jid}.")
+                    self.set_next_state("WAIT_FOR_REQUEST_AND_CONFIRMATION")
+                elif content.get("type") == "confirm_parking" and self.agent.current_car is None:
+                    self.agent.current_car = content.get("car")
+                    print(f"[{self.agent.jid}] Parking confirmed for car: {self.agent.current_car}.")
+                    response_msg = Message(to=self.agent.current_car)
+                    response_msg.set_metadata("performative", "inform")
+                    response_msg.body = json.dumps({
+                        "type": "confirm_response",
+                        "slot": self.agent.location,
+                        "slot_jid": str(self.agent.jid)
+                    })
+                    await self.send(response_msg)
+                    self.set_next_state("WAIT_FOR_DEPARTURE")
+                elif content.get("type") == "parking_request" and self.agent.current_car is not None:
+                    print(f"[{self.agent.jid}] Slot is occupied, rejecting new parking request.")
+                    self.set_next_state("WAIT_FOR_REQUEST_AND_CONFIRMATION")
+                else:
+                    print(f"[{self.agent.jid}] Invalid message received.")
+                    self.set_next_state("WAIT_FOR_REQUEST_AND_CONFIRMATION")
+            else:
+                print(f"[{self.agent.jid}] No messages received, staying in WAIT_FOR_REQUEST_AND_CONFIRMATION.")
+                self.set_next_state("WAIT_FOR_REQUEST_AND_CONFIRMATION")
 
 
     # WAIT_FOR_DEPARTURE State: Wait for the car to depart
@@ -125,13 +115,65 @@ class ParkingSlotAgent(Agent):
 # Main Function to Start ParkingSlotAgents
 async def main():
     # Start two parking slots
-    slot1 = ParkingSlotAgent("parking1@localhost", "parking1", location=(10, 10), cost_per_hour=5)
-    slot2 = ParkingSlotAgent("parking2@localhost", "parking2", location=(20, 20), cost_per_hour=3)
-    slot3 = ParkingSlotAgent("parking3@localhost", "parking3", location=(30, 30), cost_per_hour=4)
+    # slot1 = ParkingSlotAgent("parking1@localhost", "parking1", location=(23, 26), cost_per_hour=5)
+    # slot2 = ParkingSlotAgent("parking2@localhost", "parking2", location=(21, 26), cost_per_hour=3)
+    # slot3 = ParkingSlotAgent("parking3@localhost", "parking3", location=(25, 17), cost_per_hour=4)
     
-    await slot1.start()
-    await slot2.start()
-    await slot3.start()
+    # Road layout represented as a grid (0 = road, 1 = wall)
+    ROAD_MAP = [
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 1, 0, 1, 2, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 2, 1, 1, 0, 1, 1, 1, 1, 0, 1],
+        [1, 0, 2, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 2, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 0, 1, 1, 1, 2, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 2, 1, 1, 1],
+        [1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1],
+        [1, 0, 1, 1, 2, 1, 1, 1, 1, 1, 1, 0, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 2, 1, 1, 0, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 1, 2, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1],
+        [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 0, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    ]
+    
+    
+    # List to store the parking slot agents
+    parking_agents = []
+    
+    
+
+    # Iterate through the grid to find parking slots
+    for i, row in enumerate(ROAD_MAP):
+        for j, cell in enumerate(row):
+            if cell == 2:  # Found a parking slot
+                agent_id = len(parking_agents) + 1
+                agent_name = f"parking{agent_id}"
+                email = f"{agent_name}@localhost"
+                location = (i, j)
+                cost_per_hour = (agent_id % 3) + 3  # Example cost: rotating between 3, 4, 5
+                parking_agents.append(
+                    ParkingSlotAgent(f"{email}", f"{agent_name}", location=location, cost_per_hour=cost_per_hour)
+                )
+
+    # Print the generated parking slot agents
+    for agent in parking_agents:
+        await agent.start()
+    
+    
     print("ParkingSlotAgents are running...")
 
     try:
@@ -141,8 +183,8 @@ async def main():
         print("Stopping agents...")
 
     # Stop agents
-    await slot1.stop()
-    await slot2.stop()
+    for agent in parking_agents:
+        await agent.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
